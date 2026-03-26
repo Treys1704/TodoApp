@@ -1,26 +1,21 @@
 using FluentAssertions;
+using Moq;
 using TodoApp.Api.Models;
 using TodoApp.Api.Models.Dtos;
+using TodoApp.Api.Repositories;
 using TodoApp.Api.Services;
-using TodoApp.Api.Tests.Helpers;
 
 namespace TodoApp.Api.Tests.Services;
 
-public class TodoServiceTests : IDisposable
+public class TodoServiceTests
 {
-    private readonly Data.TodoContext _context;
+    private readonly Mock<ITodoRepository> _repositoryMock;
     private readonly TodoService _sut;
 
     public TodoServiceTests()
     {
-        _context = TestDbContextFactory.Create();
-        _sut = new TodoService(_context);
-    }
-
-    public void Dispose()
-    {
-        _context.Database.EnsureDeleted();
-        _context.Dispose();
+        _repositoryMock = new Mock<ITodoRepository>();
+        _sut = new TodoService(_repositoryMock.Object);
     }
 
     // --- GetAllAsync ---
@@ -28,20 +23,23 @@ public class TodoServiceTests : IDisposable
     [Fact]
     public async Task GetAllAsync_WhenNoItems_ReturnsEmptyList()
     {
+        _repositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<TodoItem>());
+
         var result = await _sut.GetAllAsync();
 
         result.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task GetAllAsync_WhenItemsExist_ReturnsAllItems()
+    public async Task GetAllAsync_WhenItemsExist_ReturnsAllMappedDtos()
     {
-        _context.TodoItems.AddRange(
-            new TodoItem { Title = "Task 1", CreatedAt = DateTime.UtcNow.AddMinutes(-2) },
-            new TodoItem { Title = "Task 2", CreatedAt = DateTime.UtcNow.AddMinutes(-1) },
-            new TodoItem { Title = "Task 3", CreatedAt = DateTime.UtcNow }
-        );
-        await _context.SaveChangesAsync();
+        var items = new List<TodoItem>
+        {
+            new() { Id = 1, Title = "Task 1", CreatedAt = DateTime.UtcNow },
+            new() { Id = 2, Title = "Task 2", CreatedAt = DateTime.UtcNow },
+            new() { Id = 3, Title = "Task 3", CreatedAt = DateTime.UtcNow }
+        };
+        _repositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(items);
 
         var result = await _sut.GetAllAsync();
 
@@ -49,35 +47,27 @@ public class TodoServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAllAsync_ReturnsItemsOrderedByCreatedAtDescending()
+    public async Task GetAllAsync_CallsRepositoryOnce()
     {
-        _context.TodoItems.AddRange(
-            new TodoItem { Title = "Oldest", CreatedAt = DateTime.UtcNow.AddHours(-2) },
-            new TodoItem { Title = "Newest", CreatedAt = DateTime.UtcNow },
-            new TodoItem { Title = "Middle", CreatedAt = DateTime.UtcNow.AddHours(-1) }
-        );
-        await _context.SaveChangesAsync();
+        _repositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<TodoItem>());
 
-        var result = (await _sut.GetAllAsync()).ToList();
+        await _sut.GetAllAsync();
 
-        result[0].Title.Should().Be("Newest");
-        result[1].Title.Should().Be("Middle");
-        result[2].Title.Should().Be("Oldest");
+        _repositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
     }
 
     // --- GetByIdAsync ---
 
     [Fact]
-    public async Task GetByIdAsync_WhenItemExists_ReturnsItem()
+    public async Task GetByIdAsync_WhenItemExists_ReturnsMappedDto()
     {
-        var item = new TodoItem { Title = "Test", CreatedAt = DateTime.UtcNow };
-        _context.TodoItems.Add(item);
-        await _context.SaveChangesAsync();
+        var item = new TodoItem { Id = 1, Title = "Test", IsCompleted = false, CreatedAt = DateTime.UtcNow };
+        _repositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(item);
 
-        var result = await _sut.GetByIdAsync(item.Id);
+        var result = await _sut.GetByIdAsync(1);
 
         result.Should().NotBeNull();
-        result!.Id.Should().Be(item.Id);
+        result!.Id.Should().Be(1);
         result.Title.Should().Be("Test");
         result.IsCompleted.Should().BeFalse();
     }
@@ -85,6 +75,8 @@ public class TodoServiceTests : IDisposable
     [Fact]
     public async Task GetByIdAsync_WhenItemDoesNotExist_ReturnsNull()
     {
+        _repositoryMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((TodoItem?)null);
+
         var result = await _sut.GetByIdAsync(999);
 
         result.Should().BeNull();
@@ -93,24 +85,28 @@ public class TodoServiceTests : IDisposable
     // --- CreateAsync ---
 
     [Fact]
-    public async Task CreateAsync_AddsItemToDatabase()
+    public async Task CreateAsync_CallsRepositoryAddAndReturnsMappedDto()
     {
-        var dto = new CreateTodoDto { Title = "New Task" };
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<TodoItem>()))
+            .ReturnsAsync((TodoItem item) => { item.Id = 1; return item; });
 
-        var result = await _sut.CreateAsync(dto);
+        var result = await _sut.CreateAsync(new CreateTodoDto { Title = "New Task" });
 
         result.Should().NotBeNull();
         result.Title.Should().Be("New Task");
         result.IsCompleted.Should().BeFalse();
-        result.Id.Should().BeGreaterThan(0);
+        result.Id.Should().Be(1);
 
-        _context.TodoItems.Should().HaveCount(1);
+        _repositoryMock.Verify(r => r.AddAsync(It.Is<TodoItem>(i => i.Title == "New Task")), Times.Once);
     }
 
     [Fact]
     public async Task CreateAsync_SetsCreatedAtToUtcNow()
     {
         var before = DateTime.UtcNow;
+
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<TodoItem>()))
+            .ReturnsAsync((TodoItem item) => item);
 
         var result = await _sut.CreateAsync(new CreateTodoDto { Title = "Timed" });
 
@@ -119,14 +115,14 @@ public class TodoServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAsync_MultipleCalls_CreatesDistinctItems()
+    public async Task CreateAsync_SetsIsCompletedToFalse()
     {
-        await _sut.CreateAsync(new CreateTodoDto { Title = "A" });
-        await _sut.CreateAsync(new CreateTodoDto { Title = "B" });
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<TodoItem>()))
+            .ReturnsAsync((TodoItem item) => item);
 
-        var all = (await _sut.GetAllAsync()).ToList();
-        all.Should().HaveCount(2);
-        all.Select(x => x.Title).Should().Contain(new[] { "A", "B" });
+        var result = await _sut.CreateAsync(new CreateTodoDto { Title = "Fresh" });
+
+        result.IsCompleted.Should().BeFalse();
     }
 
     // --- UpdateAsync ---
@@ -134,38 +130,38 @@ public class TodoServiceTests : IDisposable
     [Fact]
     public async Task UpdateAsync_WhenItemExists_UpdatesTitleAndReturnsDto()
     {
-        var item = new TodoItem { Title = "Old Title", CreatedAt = DateTime.UtcNow };
-        _context.TodoItems.Add(item);
-        await _context.SaveChangesAsync();
+        var item = new TodoItem { Id = 1, Title = "Old Title", CreatedAt = DateTime.UtcNow };
+        _repositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(item);
 
-        var result = await _sut.UpdateAsync(item.Id, new UpdateTodoDto { Title = "New Title" });
+        var result = await _sut.UpdateAsync(1, new UpdateTodoDto { Title = "New Title" });
 
         result.Should().NotBeNull();
         result!.Title.Should().Be("New Title");
-
-        var dbItem = await _context.TodoItems.FindAsync(item.Id);
-        dbItem!.Title.Should().Be("New Title");
+        _repositoryMock.Verify(r => r.UpdateAsync(It.Is<TodoItem>(i => i.Title == "New Title")), Times.Once);
     }
 
     [Fact]
     public async Task UpdateAsync_WhenItemDoesNotExist_ReturnsNull()
     {
+        _repositoryMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((TodoItem?)null);
+
         var result = await _sut.UpdateAsync(999, new UpdateTodoDto { Title = "Whatever" });
 
         result.Should().BeNull();
+        _repositoryMock.Verify(r => r.UpdateAsync(It.IsAny<TodoItem>()), Times.Never);
     }
 
     [Fact]
     public async Task UpdateAsync_DoesNotChangeOtherFields()
     {
-        var item = new TodoItem { Title = "Original", IsCompleted = true, CreatedAt = DateTime.UtcNow.AddDays(-1) };
-        _context.TodoItems.Add(item);
-        await _context.SaveChangesAsync();
+        var createdAt = DateTime.UtcNow.AddDays(-1);
+        var item = new TodoItem { Id = 1, Title = "Original", IsCompleted = true, CreatedAt = createdAt };
+        _repositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(item);
 
-        var result = await _sut.UpdateAsync(item.Id, new UpdateTodoDto { Title = "Updated" });
+        var result = await _sut.UpdateAsync(1, new UpdateTodoDto { Title = "Updated" });
 
         result!.IsCompleted.Should().BeTrue();
-        result.CreatedAt.Should().Be(item.CreatedAt);
+        result.CreatedAt.Should().Be(createdAt);
     }
 
     // --- CompleteAsync ---
@@ -173,35 +169,34 @@ public class TodoServiceTests : IDisposable
     [Fact]
     public async Task CompleteAsync_WhenItemExists_SetsIsCompletedToTrue()
     {
-        var item = new TodoItem { Title = "To complete", CreatedAt = DateTime.UtcNow };
-        _context.TodoItems.Add(item);
-        await _context.SaveChangesAsync();
+        var item = new TodoItem { Id = 1, Title = "To complete", IsCompleted = false, CreatedAt = DateTime.UtcNow };
+        _repositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(item);
 
-        var result = await _sut.CompleteAsync(item.Id);
+        var result = await _sut.CompleteAsync(1);
 
         result.Should().NotBeNull();
         result!.IsCompleted.Should().BeTrue();
-
-        var dbItem = await _context.TodoItems.FindAsync(item.Id);
-        dbItem!.IsCompleted.Should().BeTrue();
+        _repositoryMock.Verify(r => r.UpdateAsync(It.Is<TodoItem>(i => i.IsCompleted)), Times.Once);
     }
 
     [Fact]
     public async Task CompleteAsync_WhenItemDoesNotExist_ReturnsNull()
     {
+        _repositoryMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((TodoItem?)null);
+
         var result = await _sut.CompleteAsync(999);
 
         result.Should().BeNull();
+        _repositoryMock.Verify(r => r.UpdateAsync(It.IsAny<TodoItem>()), Times.Never);
     }
 
     [Fact]
     public async Task CompleteAsync_WhenAlreadyCompleted_RemainsCompleted()
     {
-        var item = new TodoItem { Title = "Already done", IsCompleted = true, CreatedAt = DateTime.UtcNow };
-        _context.TodoItems.Add(item);
-        await _context.SaveChangesAsync();
+        var item = new TodoItem { Id = 1, Title = "Already done", IsCompleted = true, CreatedAt = DateTime.UtcNow };
+        _repositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(item);
 
-        var result = await _sut.CompleteAsync(item.Id);
+        var result = await _sut.CompleteAsync(1);
 
         result!.IsCompleted.Should().BeTrue();
     }
@@ -209,38 +204,26 @@ public class TodoServiceTests : IDisposable
     // --- DeleteAsync ---
 
     [Fact]
-    public async Task DeleteAsync_WhenItemExists_RemovesItemAndReturnsTrue()
+    public async Task DeleteAsync_WhenItemExists_CallsRepositoryDeleteAndReturnsTrue()
     {
-        var item = new TodoItem { Title = "To delete", CreatedAt = DateTime.UtcNow };
-        _context.TodoItems.Add(item);
-        await _context.SaveChangesAsync();
+        var item = new TodoItem { Id = 1, Title = "To delete", CreatedAt = DateTime.UtcNow };
+        _repositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(item);
 
-        var result = await _sut.DeleteAsync(item.Id);
+        var result = await _sut.DeleteAsync(1);
 
         result.Should().BeTrue();
-        _context.TodoItems.Should().BeEmpty();
+        _repositoryMock.Verify(r => r.DeleteAsync(item), Times.Once);
     }
 
     [Fact]
     public async Task DeleteAsync_WhenItemDoesNotExist_ReturnsFalse()
     {
+        _repositoryMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((TodoItem?)null);
+
         var result = await _sut.DeleteAsync(999);
 
         result.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task DeleteAsync_OnlyRemovesTargetItem()
-    {
-        var item1 = new TodoItem { Title = "Keep", CreatedAt = DateTime.UtcNow };
-        var item2 = new TodoItem { Title = "Delete", CreatedAt = DateTime.UtcNow };
-        _context.TodoItems.AddRange(item1, item2);
-        await _context.SaveChangesAsync();
-
-        await _sut.DeleteAsync(item2.Id);
-
-        _context.TodoItems.Should().HaveCount(1);
-        _context.TodoItems.First().Title.Should().Be("Keep");
+        _repositoryMock.Verify(r => r.DeleteAsync(It.IsAny<TodoItem>()), Times.Never);
     }
 
     // --- Mapping ---
@@ -248,21 +231,16 @@ public class TodoServiceTests : IDisposable
     [Fact]
     public async Task MapToDto_MapsAllFieldsCorrectly()
     {
-        var item = new TodoItem
-        {
-            Title = "Mapped",
-            IsCompleted = true,
-            CreatedAt = new DateTime(2025, 1, 15, 10, 30, 0, DateTimeKind.Utc)
-        };
-        _context.TodoItems.Add(item);
-        await _context.SaveChangesAsync();
+        var createdAt = new DateTime(2025, 1, 15, 10, 30, 0, DateTimeKind.Utc);
+        var item = new TodoItem { Id = 42, Title = "Mapped", IsCompleted = true, CreatedAt = createdAt };
+        _repositoryMock.Setup(r => r.GetByIdAsync(42)).ReturnsAsync(item);
 
-        var result = await _sut.GetByIdAsync(item.Id);
+        var result = await _sut.GetByIdAsync(42);
 
         result.Should().NotBeNull();
-        result!.Id.Should().Be(item.Id);
+        result!.Id.Should().Be(42);
         result.Title.Should().Be("Mapped");
         result.IsCompleted.Should().BeTrue();
-        result.CreatedAt.Should().Be(new DateTime(2025, 1, 15, 10, 30, 0, DateTimeKind.Utc));
+        result.CreatedAt.Should().Be(createdAt);
     }
 }
