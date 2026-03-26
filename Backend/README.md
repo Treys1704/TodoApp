@@ -1,6 +1,6 @@
 # TodoApp Backend
 
-API REST construite avec **.NET 8 Web API**, **Entity Framework Core** et **SQLite**.
+API REST construite avec **.NET 8 Web API**, **Entity Framework Core** et **SQLite**, structurée selon le **Repository Pattern**.
 
 ## Prérequis
 
@@ -19,16 +19,29 @@ Backend/
 │   ├── Controllers/        # Endpoints REST
 │   ├── Models/             # Entité TodoItem + DTOs
 │   ├── Data/               # DbContext (EF Core)
+│   ├── Repositories/       # Couche d'accès aux données (ITodoRepository / TodoRepository)
 │   ├── Services/           # Logique métier (ITodoService / TodoService)
 │   ├── Migrations/         # Migrations EF Core
-│   ├── Program.cs          # Point d'entrée + configuration
+│   ├── Program.cs          # Point d'entrée + configuration DI
 │   └── appsettings.json    # Connection string SQLite
 │
 └── TodoApp.Api.Tests/
-    ├── Controllers/        # Tests unitaires du controller (Moq)
-    ├── Services/           # Tests unitaires du service (EF InMemory)
+    ├── Controllers/        # Tests unitaires du controller (Mock ITodoService)
+    ├── Services/           # Tests unitaires du service (Mock ITodoRepository)
+    ├── Repositories/       # Tests d'intégration du repository (EF InMemory)
     └── Helpers/            # Factory DbContext pour les tests
 ```
+
+## Architecture
+
+```
+TodoController → ITodoService → ITodoRepository → TodoContext (EF Core) → SQLite
+```
+
+Chaque couche dépend uniquement de l'interface de la couche inférieure via l'injection de dépendances. Cette séparation permet de :
+
+- **Tester** chaque couche indépendamment en mockant l'interface de la couche en dessous
+- **Remplacer la base de données** en créant une nouvelle implémentation de `ITodoRepository` sans toucher au service ni au controller
 
 ## Lancer le projet
 
@@ -48,7 +61,13 @@ cd Backend/TodoApp.Api.Tests
 dotnet test
 ```
 
-33 tests unitaires couvrent le service et le controller.
+42 tests couvrent les 3 couches :
+
+| Couche     | Fichier               | Technique              | Tests |
+| ---------- | --------------------- | ---------------------- | ----- |
+| Controller | `TodoControllerTests` | Mock `ITodoService`    | 15    |
+| Service    | `TodoServiceTests`    | Mock `ITodoRepository` | 18    |
+| Repository | `TodoRepositoryTests` | EF Core InMemory       | 9     |
 
 ## Stack technique
 
@@ -57,7 +76,8 @@ dotnet test
 | Framework       | .NET 8 Web API                            |
 | ORM             | Entity Framework Core 8                   |
 | Base de données | SQLite                                    |
-| Documentation   | Swagger                                   |
+| Architecture    | Repository Pattern                        |
+| Documentation   | Swagger / OpenAPI                         |
 | Tests           | xUnit, Moq, FluentAssertions, EF InMemory |
 
 ---

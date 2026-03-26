@@ -8,11 +8,12 @@ TodoApp permet de **créer**, **lister**, **compléter**, **éditer** et **suppr
 
 ## Stack technique
 
-| Couche   | Technologies                                                              |
-| -------- | ------------------------------------------------------------------------- |
-| Backend  | .NET 8 Web API, Entity Framework Core 8, SQLite                           |
-| Frontend | React 19, Vite 8, Tailwind CSS v4, Framer Motion, Zustand, TanStack Query |
-| Tests    | xUnit, Moq, FluentAssertions, EF Core InMemory                            |
+| Couche       | Technologies                                                              |
+| ------------ | ------------------------------------------------------------------------- |
+| Backend      | .NET 8 Web API, Entity Framework Core 8, SQLite                           |
+| Architecture | Repository Pattern, Dependency Injection                                  |
+| Frontend     | React 19, Vite 8, Tailwind CSS v4, Framer Motion, Zustand, TanStack Query |
+| Tests        | xUnit, Moq, FluentAssertions, EF Core InMemory                            |
 
 ## Structure du projet
 
@@ -21,15 +22,17 @@ TodoApp/
 ├── Backend/
 │   ├── TodoApp.Api/              # API REST (.NET 8)
 │   │   ├── Controllers/          # Endpoints REST
-│   │   ├── Services/             # Logique métier (interface + implémentation)
+│   │   ├── Repositories/         # Couche d'accès aux données (ITodoRepository)
+│   │   ├── Services/             # Logique métier (ITodoService)
 │   │   ├── Models/               # Entité TodoItem + DTOs
 │   │   ├── Data/                 # DbContext EF Core
 │   │   ├── Migrations/           # Migrations EF Core (SQLite)
-│   │   └── Program.cs            # Point d'entrée + configuration
+│   │   └── Program.cs            # Point d'entrée + configuration DI
 │   │
-│   ├── TodoApp.Api.Tests/        # Tests unitaires (33 tests)
-│   │   ├── Services/             # Tests du service (EF InMemory)
-│   │   ├── Controllers/          # Tests du controller (Moq)
+│   ├── TodoApp.Api.Tests/        # Tests (42 tests)
+│   │   ├── Controllers/          # Tests du controller (Mock ITodoService)
+│   │   ├── Services/             # Tests du service (Mock ITodoRepository)
+│   │   ├── Repositories/         # Tests du repository (EF InMemory)
 │   │   └── Helpers/              # Factory DbContext pour les tests
 │   │
 │   └── README.md                 # Documentation backend + API
