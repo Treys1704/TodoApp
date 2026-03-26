@@ -1,31 +1,27 @@
-using Microsoft.EntityFrameworkCore;
-using TodoApp.Api.Data;
 using TodoApp.Api.Models;
 using TodoApp.Api.Models.Dtos;
+using TodoApp.Api.Repositories;
 
 namespace TodoApp.Api.Services;
 
 public class TodoService : ITodoService
 {
-    private readonly TodoContext _context;
+    private readonly ITodoRepository _repository;
 
-    public TodoService(TodoContext context)
+    public TodoService(ITodoRepository repository)
     {
-        _context = context;
+        _repository = repository;
     }
 
     public async Task<IEnumerable<TodoItemDto>> GetAllAsync()
     {
-        var items = await _context.TodoItems
-            .OrderByDescending(t => t.CreatedAt)
-            .ToListAsync();
-
+        var items = await _repository.GetAllAsync();
         return items.Select(MapToDto);
     }
 
     public async Task<TodoItemDto?> GetByIdAsync(int id)
     {
-        var item = await _context.TodoItems.FindAsync(id);
+        var item = await _repository.GetByIdAsync(id);
         return item is null ? null : MapToDto(item);
     }
 
@@ -37,41 +33,39 @@ public class TodoService : ITodoService
             CreatedAt = DateTime.UtcNow
         };
 
-        _context.TodoItems.Add(item);
-        await _context.SaveChangesAsync();
+        await _repository.AddAsync(item);
 
         return MapToDto(item);
     }
 
     public async Task<TodoItemDto?> UpdateAsync(int id, UpdateTodoDto dto)
     {
-        var item = await _context.TodoItems.FindAsync(id);
+        var item = await _repository.GetByIdAsync(id);
         if (item is null) return null;
 
         item.Title = dto.Title;
-        await _context.SaveChangesAsync();
+        await _repository.UpdateAsync(item);
 
         return MapToDto(item);
     }
 
     public async Task<TodoItemDto?> CompleteAsync(int id)
     {
-        var item = await _context.TodoItems.FindAsync(id);
+        var item = await _repository.GetByIdAsync(id);
         if (item is null) return null;
 
         item.IsCompleted = true;
-        await _context.SaveChangesAsync();
+        await _repository.UpdateAsync(item);
 
         return MapToDto(item);
     }
 
     public async Task<bool> DeleteAsync(int id)
     {
-        var item = await _context.TodoItems.FindAsync(id);
+        var item = await _repository.GetByIdAsync(id);
         if (item is null) return false;
 
-        _context.TodoItems.Remove(item);
-        await _context.SaveChangesAsync();
+        await _repository.DeleteAsync(item);
 
         return true;
     }
