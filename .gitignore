@@ -1,0 +1,20 @@
+# Build outputs
+bin/
+obj/
+
+# EF Core migrations snapshots
+*.db
+*.sqlite
+*.sqlite3
+
+# User-specific files
+*.user
+
+# Logs
+*.log
+
+.idea/
+.vscode/
+
+.DS_Store
+Thumbs.db
